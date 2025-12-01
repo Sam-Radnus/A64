@@ -1,20 +1,44 @@
 from django.db import models
 from django.contrib.auth.models import AbstractUser
-from django.contrib.contenttypes.models import ContentType
-from django.contrib.contenttypes.fields import GenericForeignKey
+from django.core.exceptions import ValidationError
 
 class Organization(models.Model):
     name = models.CharField(max_length=255, unique=True)
     description = models.TextField(blank=True)
+
+    manager = models.ForeignKey(
+        'accounts.User',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='managed_organizations'
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-    
+
     class Meta:
         db_table = 'organizations'
         ordering = ['name']
-    
+
+    def clean(self):
+        """
+        Ensures: If a manager is assigned, that manager must belong
+        to this organization.
+        This works across ALL database backends.
+        """
+        if self.manager:
+            if self.manager.organization_id != self.id:
+                raise ValidationError("Manager must be a member of this organization.")
+
+    def save(self, *args, **kwargs):
+        # Always run clean() before saving
+        self.clean()
+        super().save(*args, **kwargs)
+
     def __str__(self):
         return self.name
+
 
 class User(AbstractUser):
     name = models.CharField(max_length=255)
@@ -41,56 +65,6 @@ class User(AbstractUser):
     def __str__(self):
         return self.email
 
-class AccessControlEntry(models.Model):
-    # Generic foreign key to any entity
-    content_type = models.ForeignKey(ContentType, on_delete=models.CASCADE)
-    object_id = models.PositiveIntegerField()
-    entity = GenericForeignKey('content_type', 'object_id')
-    
-    # Either user OR organization, not both
-    user = models.ForeignKey(User, null=True, blank=True, on_delete=models.CASCADE, related_name='permissions')
-    organization = models.ForeignKey(Organization, null=True, blank=True, on_delete=models.CASCADE, related_name='permissions')
-    
-    # Permissions
-    can_read = models.BooleanField(default=False)
-    can_write = models.BooleanField(default=False)
-    can_execute = models.BooleanField(default=False)
-    
-    # Metadata
-    granted_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='granted_permissions')
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-    expires_at = models.DateTimeField(null=True, blank=True)
-    
-    class Meta:
-        db_table = 'access_control_entries'
-        indexes = [
-            models.Index(fields=['content_type', 'object_id']),
-            models.Index(fields=['user', 'content_type']),
-            models.Index(fields=['organization', 'content_type']),
-            models.Index(fields=['expires_at']),
-        ]
-        constraints = [
-            models.CheckConstraint(
-                check=(
-                    models.Q(user__isnull=False, organization__isnull=True) |
-                    models.Q(user__isnull=True, organization__isnull=False)
-                ),
-                name='user_or_organization_not_both'
-            ),
-            models.UniqueConstraint(
-                fields=['content_type', 'object_id', 'user'],
-                name='unique_user_entity_permission'
-            ),
-            models.UniqueConstraint(
-                fields=['content_type', 'object_id', 'organization'],
-                name='unique_org_entity_permission'
-            ),
-        ]
-    
-    def __str__(self):
-        subject = self.user or self.organization
-        return f"{subject} -> {self.entity}"
 
 class File(models.Model):
     name = models.CharField(max_length=255)
