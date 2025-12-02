@@ -1,6 +1,8 @@
 from rest_framework import serializers
 from django.contrib.auth import get_user_model
 from django.contrib.auth.password_validation import validate_password
+from rest_framework import serializers
+from accounts.models import Organization, User
 
 User = get_user_model()
 
@@ -27,4 +29,32 @@ class LoginSerializer(serializers.Serializer):
     username = serializers.CharField()
     password = serializers.CharField(write_only=True)
 
-    
+
+class UserSerializer(serializers.ModelSerializer):
+    organization_name = serializers.SerializerMethodField()
+
+    def get_organization_name(self, obj):
+        return obj.organization.name if obj.organization else None
+
+    class Meta:
+        model = User
+        fields = ['id', 'email', 'name', 'organization_id', 'organization_name']
+
+class OrganizationMemberSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = User
+        fields = ["id", "email", "name"]
+
+
+class OrganizationSerializer(serializers.ModelSerializer):
+    members = OrganizationMemberSerializer(many=True, read_only=True)
+    class Meta:
+        model = Organization
+        fields = ['id', 'name', 'description', 'manager', 'members','created_at', 'updated_at']
+
+
+
+
+
+
+
